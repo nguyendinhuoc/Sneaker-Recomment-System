@@ -16,7 +16,7 @@ def train_item_based_model():
     
     # 2. Lấy nguyên liệu (Lịch sử tương tác)
     print("📥 1. Đang lấy dữ liệu hành vi người dùng...")
-    query = "SELECT user_id, product_id, action_type FROM interactions"
+    query = "SELECT user_id, product_id, interaction_type FROM interactions"
     df = pd.read_sql(query, engine)
     
     if df.empty:
@@ -26,7 +26,7 @@ def train_item_based_model():
     # 3. Làm sạch và Chấm điểm (Scoring)
     print("⚖️ 2. Đang chấm điểm: View (1), Cart (3), Buy (5)...")
     scores = {'view': 1, 'add_to_cart': 3, 'buy': 5}
-    df['score'] = df['action_type'].map(scores)
+    df['score'] = df['interaction_type'].map(scores)
     
     # Nếu 1 người click xem 1 đôi giày 5 lần, ta cộng dồn điểm lại cho chính xác mức độ quan tâm
     df_grouped = df.groupby(['user_id', 'product_id'])['score'].sum().reset_index()
