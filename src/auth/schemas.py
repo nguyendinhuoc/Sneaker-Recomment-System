@@ -1,19 +1,17 @@
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel
 from typing import Optional
 
 class UserCreate(BaseModel):
     username: str
     password: str
-    age: Optional[int] = None
-    gender: Optional[str] = None
+    # Sử dụng kiểu cơ bản nhất để Pydantic không bị 'loạn'
+    age: Optional[int] = 20 
+    gender: Optional[str] = "Nam"
 
 class UserResponse(BaseModel):
     user_id: int
     username: str
     
     class Config:
+        # Pydantic v2 dùng from_attributes thay vì orm_mode
         from_attributes = True
-
-class InteractionCreate(BaseModel):
-    product_id: str
-    action_type: str

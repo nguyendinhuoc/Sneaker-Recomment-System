@@ -33,18 +33,32 @@ def register_user(user: UserCreate):
     conn = get_db_conn()
     cur = conn.cursor()
     try:
-        cur.execute("SELECT user_id FROM users WHERE username = %s", (user.username,))
+        # 1. Tìm theo cột 'name' (Vì DB bạn đã đổi username -> name)
+        cur.execute("SELECT user_id FROM users WHERE name = %s", (user.username,))
         if cur.fetchone():
             raise HTTPException(status_code=400, detail="Username already registered")
         
-        hashed_pw = hash_password(user.password)
+        # 2. Lấy mật khẩu thô (Vì bạn muốn bỏ băm để demo cho nhanh)
+        raw_password = user.password 
+        
+        # 3. Đảm bảo các cột INSERT khớp 100% với bảng trên Neon
+        # Chú ý: Dùng 'name' và 'password' thay vì 'username'/'password_hash'
         cur.execute("""
-            INSERT INTO users (username, password_hash, age, gender) 
-            VALUES (%s, %s, %s, %s) RETURNING user_id
-        """, (user.username, hashed_pw, user.age, user.gender))
+            INSERT INTO users (name, password, age, gender, created_at) 
+            VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP) RETURNING user_id
+        """, (user.username, raw_password, user.age, user.gender))
+        
         user_id = cur.fetchone()[0]
         conn.commit()
+        
+        # Trả về kết quả khớp với UserResponse schema
         return {"user_id": user_id, "username": user.username}
+        
+    except Exception as e:
+        # In lỗi thật sự ra Terminal để bạn nhìn thấy
+        print(f"--- LỖI TẠI ĐÂY: {e} ---") 
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
     finally:
         cur.close()
         conn.close()
@@ -58,9 +72,12 @@ def login_user(req: LoginRequest):
     conn = get_db_conn()
     cur = conn.cursor()
     try:
-        cur.execute("SELECT user_id, password_hash FROM users WHERE username = %s", (req.username,))
+        # Lấy mật khẩu từ database
+        cur.execute("SELECT user_id, password FROM users WHERE name = %s", (req.username,))
         row = cur.fetchone()
-        if not row or not verify_password(req.password, row[1]):
+        
+        # So sánh trực tiếp, không dùng verify_password nữa
+        if not row or req.password != row[1]:
             raise HTTPException(status_code=401, detail="Invalid username or password")
         
         return signJWT(row[0])
@@ -79,11 +96,11 @@ def record_interaction(req: InteractRequest, token: dict = Depends(JWTBearer()))
     cur = conn.cursor()
     try:
         cur.execute("""
-            INSERT INTO interactions (user_id, product_id, action_type)
-            VALUES (%s, %s, %s)
-        """, (user_id, req.product_id, req.action_type))
+    INSERT INTO interactions (user_id, product_id, interaction_type) -- Sửa thành interaction_type
+    VALUES (%s, %s, %s)
+    """, (user_id, req.product_id, req.action_type)) # req.action_type giữ nguyên vì nó lấy từ Pydantic
         conn.commit()
-        return {"message": f"Recorded {req.action_type} for product {req.product_id}"}
+        return {"message": "Success"}
     except Exception as e:
         conn.rollback()
         raise HTTPException(status_code=500, detail=str(e))
@@ -91,24 +108,31 @@ def record_interaction(req: InteractRequest, token: dict = Depends(JWTBearer()))
         cur.close()
         conn.close()
 
-@app.get("/recently-viewed", dependencies=[Depends(JWTBearer())])
-def get_recently_viewed(token: dict = Depends(JWTBearer())):
-    user_id = token.get("user_id")
+@app.get("/recommendations/user", dependencies=[Depends(JWTBearer())])
+def get_user_recommendations(token: dict = Depends(JWTBearer())):
+    user_id = str(token.get("user_id")) # Đảm bảo ép kiểu string để khớp với AI
     conn = get_db_conn()
     cur = conn.cursor()
+    
     try:
+        # Lấy top 10 sản phẩm được AI gợi ý cho user này
         cur.execute("""
-            SELECT DISTINCT ON (p.product_id) p.product_id, p.name, p.price, p.image_url, i.interaction_id
-            FROM interactions i
-            JOIN products p ON i.product_id = p.product_id
-            WHERE i.user_id = %s AND i.action_type = 'view'
-            ORDER BY p.product_id, i.interaction_id DESC
-            LIMIT 20
+            SELECT p.product_id, p.name, p.price, p.image_url, g.score
+            FROM gold_user_recommendations g
+            JOIN products p ON g.product_id = p.product_id
+            WHERE g.user_id = %s
+            ORDER BY g.score DESC
+            LIMIT 10
         """, (user_id,))
+        
         rows = cur.fetchall()
-        # Sắp xếp lại theo thời gian tương tác (giảm dần)
-        sorted_rows = sorted(rows, key=lambda x: x[4], reverse=True)
-        return [{"product_id": r[0], "name": r[1], "price": r[2], "image_url": r[3]} for r in sorted_rows]
+        
+        # Nếu chưa có gợi ý cá nhân hóa (người dùng mới hoàn toàn)
+        if not rows:
+            cur.execute("SELECT product_id, name, price, image_url FROM products ORDER BY RANDOM() LIMIT 10")
+            rows = cur.fetchall()
+            
+        return [{"product_id": r[0], "name": r[1], "price": r[2], "image_url": r[3]} for r in rows]
     finally:
         cur.close()
         conn.close()
@@ -194,7 +218,7 @@ def get_orders(token: dict = Depends(JWTBearer())):
             SELECT p.product_id, p.name, p.price, p.image_url
             FROM interactions i
             JOIN products p ON i.product_id = p.product_id
-            WHERE i.user_id = %s AND i.action_type = 'buy'
+            WHERE i.user_id = %s AND i.interaction_type = 'buy'
             ORDER BY i.interaction_id DESC
         """, (user_id,))
         rows = cur.fetchall()
@@ -214,7 +238,7 @@ def get_cart(token: dict = Depends(JWTBearer())):
             SELECT DISTINCT ON (p.product_id) p.product_id, p.name, p.price, p.image_url, i.interaction_id
             FROM interactions i
             JOIN products p ON i.product_id::text = p.product_id::text
-            WHERE i.user_id = %s AND i.action_type = 'add_to_cart'
+            WHERE i.user_id = %s AND i.interaction_type = 'add_to_cart'
             ORDER BY p.product_id, i.interaction_id DESC
         """, (user_id,))
         rows = cur.fetchall()
