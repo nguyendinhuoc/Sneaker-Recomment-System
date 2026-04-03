@@ -30,7 +30,17 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: python src/scripts/load_silver_to_postgres.py
 
-      - name: 🧠 Chạy AI Huấn luyện thuật toán gợi ý
+      - name: 🧱 Build product features từ Neon
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-        run: python src/train_recommender.py
+        run: python src/features/feature_engineering.py
+
+      - name: 👤 Build user profiles từ Neon
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: python src/features/user_profile.py
+
+      - name: 🧠 Train item similarity từ interaction thật trên Neon
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: python src/train_item_similarity_from_db.py

@@ -1,0 +1,67 @@
+1. Pipeline dữ liệu chính
+
+Chọn:
+
+src/ingestion/crawler.py
+src/transformation/silver_cleaning.py
+src/transformation/silver_users.py
+src/transformation/silver_interactions.py
+src/transformation/sync_silver_to_local.py
+2. Pipeline model chính
+
+Chọn:
+
+src/features/feature_engineering.py
+src/features/user_profile.py
+src/models/item_similarity.py
+src/models/candidate_generation.py
+src/models/ranking.py
+3. Serving chính
+
+Chọn:
+
+src/scripts/load_silver_to_postgres.py
+src/scripts/load_gold_to_postgres.py
+src/main.py
+
+Nhóm giữ làm luồng chính
+
+Đây là các file bạn nên giữ ở tuyến chính của project.
+
+A. Pipeline dữ liệu
+src/ingestion/crawler.py
+src/ingestion/uploader.py
+src/transformation/silver_cleaning.py
+src/transformation/silver_users.py
+src/transformation/silver_interactions.py
+src/transformation/sync_silver_to_local.py
+B. Pipeline feature/model
+src/features/feature_engineering.py
+src/features/user_profile.py
+src/models/item_similarity.py
+src/models/candidate_generation.py
+src/models/ranking.py
+C. Serving / load / app
+src/serving/collaborative_recommender.py
+src/serving/popularity_recommender.py
+src/serving/session_recommender.py
+src/serving/publish_gold.py
+src/scripts/load_silver_to_postgres.py
+src/scripts/load_gold_to_postgres.py
+src/main.py
+src/auth/*
+src/database/init_db.py
+D. Orchestration
+pipelines/run_pipeline.py
+pipelines/run_end_to_end.py
+
+
+Nhóm phụ trợ / môi trường
+
+Nhóm này không phải core business logic.
+
+notebooks/01_eda.ipynb
+notebooks/dev_silver.ipynb
+hadoop/bin/winutils.exe
+hadoop/bin/hadoop.dll
+src/ingestion/msedgedriver.exe

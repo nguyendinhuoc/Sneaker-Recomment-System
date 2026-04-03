@@ -1,10 +1,9 @@
-import psycopg2
 import os
 import pandas as pd
+import numpy as np
+
 from dotenv import load_dotenv
 from sqlalchemy import create_engine
-import numpy as np
-from sqlalchemy import text
 
 # 1. Định nghĩa bảng trọng số (Action Weights) - Cần khớp với Database
 ACTION_WEIGHTS = {
@@ -14,39 +13,62 @@ ACTION_WEIGHTS = {
     'purchase': 5
 }
 
-# LOAD DATA TỪ NEON SQL
+# LOAD DATA TỪ LOCAL PROCESSED / FEATURE STORE
 def load_data():
+    print("--- 1. Đang đọc dữ liệu tương tác từ Neon SQL ---")
     load_dotenv()
-    db_url = os.environ.get("DATABASE_URL")
+
+    db_url = os.getenv("DATABASE_URL")
     if not db_url:
         raise ValueError("DATABASE_URL không tồn tại trong file .env")
-    
+
     engine = create_engine(db_url)
-    
-    print("--- 1. Đang kéo dữ liệu tương tác từ Neon SQL ---")
-    query_interactions = "SELECT user_id, product_id, interaction_type as action, interaction_time FROM interactions"
-    interactions = pd.read_sql(query_interactions, engine)
-    
-    # ÉP KIỂU product_id về string để đồng bộ với Parquet
-    interactions['product_id'] = interactions['product_id'].astype(str)
+
+    interactions_query = """
+        SELECT
+            interaction_id,
+            user_id,
+            product_id,
+            interaction_type,
+            quantity,
+            interaction_time
+        FROM interactions
+    """
+
+    interactions = pd.read_sql(interactions_query, engine)
+
+    required_interaction_cols = ["user_id", "product_id", "interaction_type"]
+    missing_interaction_cols = [c for c in required_interaction_cols if c not in interactions.columns]
+    if missing_interaction_cols:
+        raise ValueError(
+            f"Thiếu cột trong dữ liệu interactions từ Neon: {missing_interaction_cols}"
+        )
+
+    interactions = interactions.rename(columns={"interaction_type": "action"})
+    interactions["user_id"] = interactions["user_id"].astype(str)
+    interactions["product_id"] = interactions["product_id"].astype(str)
+
+    if "interaction_time" not in interactions.columns:
+        interactions["interaction_time"] = pd.NaT
 
     print("--- 2. Đang đọc đặc trưng sản phẩm từ Parquet ---")
     product_features_path = "data/feature_store/product_features.parquet"
     if not os.path.exists(product_features_path):
-        raise FileNotFoundError(f"Không tìm thấy file {product_features_path}. Hãy chạy feature_engineering.py trước.")
-        
+        raise FileNotFoundError(
+            f"Không tìm thấy file {product_features_path}. "
+            "Hãy chạy feature_engineering.py trước."
+        )
+
     product_features = pd.read_parquet(product_features_path)
-    
-    # ÉP KIỂU product_id bên này cũng về string
-    product_features['product_id'] = product_features['product_id'].astype(str)
-    
+    product_features["product_id"] = product_features["product_id"].astype(str)
+
     return interactions, product_features
 
 
 def join_interactions_products(interactions, product_features):
     print("--- 3. Đang ánh xạ trọng số (weights) cho từng hành động ---")
     # Ánh xạ chữ (view/purchase) sang số (1/5)
-    interactions['weight'] = interactions['action'].map(ACTION_WEIGHTS).fillna(1)
+    interactions['weight'] = interactions['action'].map(ACTION_WEIGHTS).fillna(0)
     
     # Thực hiện merge
     df = interactions.merge(
@@ -173,10 +195,10 @@ def main():
         save_user_profiles(user_profiles)
         
         # 4. Đẩy lên Neon SQL
-        save_user_profiles_to_neon(user_profiles)
+        # save_user_profiles_to_neon(user_profiles)
 
         print("="*50)
-        print("HOÀN THÀNH: HÃY KIỂM TRA BẢNG 'user_profiles' TRÊN NEON")
+        print("HOÀN THÀNH: ĐÃ TẠO FILE data/feature_store/user_profiles.parquet")
         print("="*50 + "\n")
 
     except Exception as e:

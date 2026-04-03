@@ -1,15 +1,55 @@
-#product_feater
+import os
 import pandas as pd
 import numpy as np
 
+from dotenv import load_dotenv
+from sqlalchemy import create_engine
 from sklearn.preprocessing import OneHotEncoder
 from sklearn.preprocessing import MinMaxScaler
 
 # LOAD DATA
 def load_data():
+    load_dotenv()
 
-    products = pd.read_parquet("data/processed/products_clean.parquet")
-    interactions = pd.read_csv("data/processed/interactions_clean.csv")
+    db_url = os.getenv("DATABASE_URL")
+    if not db_url:
+        raise ValueError("DATABASE_URL không tồn tại trong file .env")
+
+    engine = create_engine(db_url)
+
+    products_query = """
+        SELECT
+            product_id,
+            name,
+            brand,
+            category,
+            style,
+            type,
+            purpose,
+            color,
+            material,
+            price,
+            image_url,
+            source_url
+        FROM products
+    """
+
+    interactions_query = """
+        SELECT
+            interaction_id,
+            user_id,
+            product_id,
+            interaction_type,
+            quantity,
+            interaction_time
+        FROM interactions
+    """
+
+    products = pd.read_sql(products_query, engine)
+    interactions = pd.read_sql(interactions_query, engine)
+
+    products["product_id"] = products["product_id"].astype(str)
+    interactions["product_id"] = interactions["product_id"].astype(str)
 
     return products, interactions
 
@@ -68,12 +108,25 @@ def scale_price(products):
 
 # COMPUTE PRODUCT POPULARITY
 def compute_popularity(interactions):
-
     view_count = (
         interactions[interactions["interaction_type"] == "view"]
         .groupby("product_id")
         .size()
         .reset_index(name="view_count")
+    )
+
+    like_count = (
+        interactions[interactions["interaction_type"] == "like"]
+        .groupby("product_id")
+        .size()
+        .reset_index(name="like_count")
+    )
+
+    add_to_cart_count = (
+        interactions[interactions["interaction_type"] == "add_to_cart"]
+        .groupby("product_id")
+        .size()
+        .reset_index(name="add_to_cart_count")
     )
 
     purchase_count = (
@@ -83,17 +136,14 @@ def compute_popularity(interactions):
         .reset_index(name="purchase_count")
     )
 
-    popularity = pd.merge(
-        view_count,
-        purchase_count,
-        on="product_id",
-        how="outer"
-    )
+    popularity = view_count.merge(like_count, on="product_id", how="outer")
+    popularity = popularity.merge(add_to_cart_count, on="product_id", how="outer")
+    popularity = popularity.merge(purchase_count, on="product_id", how="outer")
 
     popularity = popularity.fillna(0)
 
-    popularity["view_count"] = popularity["view_count"].astype(int)
-    popularity["purchase_count"] = popularity["purchase_count"].astype(int)
+    for col in ["view_count", "like_count", "add_to_cart_count", "purchase_count"]:
+        popularity[col] = popularity[col].astype(int)
 
     return popularity
 
